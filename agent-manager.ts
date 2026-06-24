@@ -21,7 +21,7 @@ const DEFAULT_CONFIG: SubdermialConfig = {
   sessionsDir: "",
   goalsDir: "",
   retryOnError: 0,
-  defaultModel: "anthropic/claude-sonnet-4-5",
+  defaultModel: "claude-sonnet-4-5",
   defaultProfile: "worker",
 };
 
@@ -225,7 +225,13 @@ export class AgentManager {
   ): Promise<void> {
     const args: string[] = ["--mode", "json", "-p", "--session", agent.sessionFile];
 
-    if (agent.model) args.push("--model", agent.model);
+    if (agent.model) {
+      // Strip provider prefix (e.g. "anthropic/claude-sonnet-4-5" -> "claude-sonnet-4-5")
+      // so the subprocess resolves the model via its own settings.
+      // Critical for users on OpenRouter or other routing providers.
+      const model = agent.model.includes("/") ? agent.model.split("/")[1] : agent.model;
+      args.push("--model", model);
+    }
     if (agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
     // Pass API key explicitly if available (child process may not inherit auth context)
