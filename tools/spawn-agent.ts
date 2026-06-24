@@ -49,7 +49,7 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
       _toolCallId: string,
       params: { task: string; tools?: string; model?: string; profile?: string },
       signal: AbortSignal | undefined,
-      _onUpdate: any,
+      onUpdate: any,
       ctx: any,
     ) {
       const toolsList = params.tools
@@ -78,6 +78,7 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
         // Wait for agent to complete (poll with abort support)
         const startTime = Date.now();
         const maxWait = 30 * 60 * 1000; // 30 minute max wait
+        let lastUpdate = 0;
 
         while (true) {
           if (signal?.aborted) {
@@ -158,6 +159,17 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
               content: [{ type: "text", text: `Agent ${agent.id} timed out after 30 minutes.` }],
               isError: true,
             };
+          }
+
+          // Streaming update every 3 seconds
+          const now = Date.now();
+          if (now - lastUpdate > 3000 && onUpdate) {
+            lastUpdate = now;
+            const elapsed = Math.round((now - agent.startTime) / 1000);
+            onUpdate({
+              content: [{ type: "text", text: `⏳ ${agent.displayName} working... (${elapsed}s, ${agent.turns} turns)` }],
+              details: { agentId: agent.id, status: agent.status, turns: agent.turns },
+            });
           }
 
           await sleep(500);
