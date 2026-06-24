@@ -22,6 +22,7 @@ const DEFAULT_CONFIG: SubdermialConfig = {
   goalsDir: "",
   retryOnError: 0,
   defaultModel: "claude-sonnet-4-5",
+  defaultProvider: "",
   defaultProfile: "worker",
 };
 
@@ -226,11 +227,12 @@ export class AgentManager {
     const args: string[] = ["--mode", "json", "-p", "--session", agent.sessionFile];
 
     if (agent.model) {
-      // Strip provider prefix (e.g. "anthropic/claude-sonnet-4-5" -> "claude-sonnet-4-5")
-      // so the subprocess resolves the model via its own settings.
-      // Critical for users on OpenRouter or other routing providers.
-      const model = agent.model.includes("/") ? agent.model.split("/")[1] : agent.model;
-      args.push("--model", model);
+      args.push("--model", agent.model);
+    }
+    // Pass explicit provider so the subprocess routes through the same
+    // provider as the orchestrator (critical for OpenRouter users)
+    if (this.config.defaultProvider) {
+      args.push("--provider", this.config.defaultProvider);
     }
     if (agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 

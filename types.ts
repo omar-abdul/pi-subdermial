@@ -121,6 +121,8 @@ export interface SubdermialConfig {
   retryOnError: number;
   /** Default model for agents (if not specified) */
   defaultModel: string;
+  /** Default provider for agents (e.g. "openrouter") */
+  defaultProvider: string;
   /** Default agent profile */
   defaultProfile: string;
 }
