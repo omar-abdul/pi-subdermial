@@ -50,11 +50,28 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
       params: { task: string; tools?: string; model?: string; profile?: string },
       signal: AbortSignal | undefined,
       onUpdate: any,
-      ctx: any,
+      ctx: ExtensionCommandContext,
     ) {
       const toolsList = params.tools
         ? params.tools.split(",").map((t: string) => t.trim()).filter(Boolean)
         : undefined;
+
+      // Resolve API key for the agent's model
+      let apiKey: string | undefined;
+      try {
+        const model = params.model || manager.getConfig().defaultModel;
+        const [provider, modelId] = model.includes("/") ? model.split("/", 2) : ["anthropic", model];
+        // Try to get the resolved model from the registry
+        const resolvedModel = ctx.modelRegistry?.find?.(provider, modelId);
+        if (resolvedModel) {
+          const auth = await ctx.modelRegistry.getApiKeyAndHeaders(resolvedModel);
+          if (auth.ok && auth.apiKey) {
+            apiKey = auth.apiKey;
+          }
+        }
+      } catch {
+        // Will fall back to env vars
+      }
 
       const goal = manager.activeGoal;
       let systemPrompt: string | undefined;
@@ -73,6 +90,7 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
           profile: params.profile,
           systemPrompt,
           goalId: goal?.id,
+          apiKey,
         });
 
         // Wait for agent to complete (poll with abort support)

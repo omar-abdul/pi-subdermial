@@ -80,8 +80,9 @@ export class AgentManager {
     cwd?: string;
     systemPrompt?: string;
     goalId?: string;
+    apiKey?: string;
   }): Promise<AgentState> {
-    const { task, tools, model, profile, cwd, systemPrompt, goalId } = params;
+    const { task, tools, model, profile, cwd, systemPrompt, goalId, apiKey } = params;
 
     // Check agent limit
     const activeAgents = [...this.agents.values()].filter(
@@ -129,7 +130,7 @@ export class AgentManager {
     this.notifyChange();
 
     // Start the agent asynchronously
-    this.runAgentProcess(agent, systemPrompt, cwd).catch((err) => {
+    this.runAgentProcess(agent, systemPrompt, cwd, apiKey).catch((err) => {
       error(`Agent ${name} process error`, err);
     });
 
@@ -220,11 +221,27 @@ export class AgentManager {
     agent: AgentState,
     systemPrompt?: string,
     cwd?: string,
+    apiKey?: string,
   ): Promise<void> {
     const args: string[] = ["--mode", "json", "-p", "--session", agent.sessionFile];
 
     if (agent.model) args.push("--model", agent.model);
     if (agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+
+    // Pass API key explicitly if available (child process may not inherit auth context)
+    let env = process.env;
+    if (apiKey) {
+      args.push("--api-key", apiKey);
+    } else {
+      // Fallback: collect all known env var API keys into a new env object
+      env = { ...process.env };
+      // Ensure standard API key env vars are present (in case they were set after process start)
+      for (const key of Object.keys(process.env)) {
+        if (key.endsWith("_API_KEY") || key.startsWith("PI_")) {
+          env[key] = process.env[key];
+        }
+      }
+    }
 
     let tmpDir: string | null = null;
     let tmpPromptPath: string | null = null;
@@ -251,6 +268,7 @@ export class AgentManager {
         cwd: cwd ?? this.ctx?.cwd ?? process.cwd(),
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
+        env,
       });
 
       agent.pid = proc.pid ?? 0;
