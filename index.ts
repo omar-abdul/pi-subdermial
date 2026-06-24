@@ -13,9 +13,10 @@
  *   spawn_agent - LLM-callable tool for the orchestrator to spawn subagents
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "./agent-manager";
 import { GoalEngine } from "./goal-engine";
 import { loadNamePool } from "./name-generator";
@@ -38,7 +39,20 @@ export default function (pi: ExtensionAPI) {
   // Initialize logger
   initLogger(subdermialDir);
 
-  // Load name pool
+  // Load name pool - copy names.json to subdermialDir if it doesn't exist
+  const namesPath = path.join(subdermialDir, "names.json");
+  if (!fs.existsSync(namesPath)) {
+    const bundledNamesPath = path.join(__dirname, "names.json");
+    try {
+      if (fs.existsSync(bundledNamesPath)) {
+        fs.mkdirSync(subdermialDir, { recursive: true });
+        fs.copyFileSync(bundledNamesPath, namesPath);
+        info("Copied names.json to subdermial dir");
+      }
+    } catch (err) {
+      error("Failed to copy names.json", err);
+    }
+  }
   loadNamePool(namesPath);
 
   // Create the agent manager
@@ -170,42 +184,36 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Session lifecycle
+  // Session lifecycle: restore state and initialize widget
   pi.on("session_start", async (event, context) => {
     info(`Session started: reason=${event.reason}`);
 
-    // Restore state from previous session
-    const entries = context.sessionManager.getEntries();
-    const stored = findStoreEntry(entries);
-    const restored = restoreStore(stored);
+    // Restore state from previous session (skip for reload - state is already in memory)
+    if (event.reason !== "reload") {
+      const entries = context.sessionManager.getEntries();
+      const stored = findStoreEntry(entries);
+      const restored = restoreStore(stored);
 
-    // Restore agents
-    manager.agents = restored.agents;
-    manager.usedNames = restored.usedNames;
+      manager.agents = restored.agents;
+      manager.usedNames = restored.usedNames;
 
-    // Re-apply active goal
-    if (restored.activeGoal) {
-      // Check if goal was completed/failed before restart
-      const goalStatus = restored.activeGoal.status;
-      if (goalStatus === "active") {
+      if (restored.activeGoal && restored.activeGoal.status === "active") {
         manager.activeGoal = restored.activeGoal;
         info(`Restored active goal: ${restored.activeGoal.id}`);
       }
+
+      if (event.reason === "resume" && manager.activeGoal) {
+        context.ui.notify(
+          `Active goal restored: ${manager.activeGoal.description.slice(0, 60)}...`,
+          "info",
+        );
+      }
+
+      manager.persist();
     }
 
-    // Initialize widget
+    // Initialize/reinitialize widget
     initWidget(context);
-
-    // If this is a resume with an active goal, notify the user
-    if (event.reason === "resume" && manager.activeGoal) {
-      context.ui.notify(
-        `Active goal restored: ${manager.activeGoal.description.slice(0, 60)}... Use /goal to check progress.`,
-        "info",
-      );
-    }
-
-    // Persist restored state (with killed agents updated by restoreStore)
-    manager.persist();
 
     info(
       `Session ready: ${manager.agents.size} agents, goal: ${manager.activeGoal ? "active" : "none"}`,
@@ -214,22 +222,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async (event) => {
     info(`Session shutdown: reason=${event.reason}`);
-
-    // Persist one last time
     manager.persist();
-
-    // Clear widget
     if (widget) widget.clear();
-
     closeLogger();
-  });
-
-  // Handle reload
-  pi.on("session_start", async (event, context) => {
-    if (event.reason === "reload") {
-      info("Extension reloaded");
-      initWidget(context);
-    }
   });
 
   info("Subdermial extension loaded");
