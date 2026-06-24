@@ -1,0 +1,11 @@
+{
+  "name": "pi-subdermial",
+  "version": "1.0.0",
+  "description": "Multi-agent orchestrator for pi - spawn, monitor, and coordinate subagents with isolated context windows",
+  "keywords": ["pi-package", "subagent", "orchestrator", "multi-agent"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {}
+}
