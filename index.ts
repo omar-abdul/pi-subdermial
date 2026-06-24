@@ -21,7 +21,7 @@ import { AgentManager } from "./agent-manager";
 import { GoalEngine } from "./goal-engine";
 import { loadNamePool } from "./name-generator";
 import { createWidgetRenderer } from "./widget";
-import { findStoreEntry, restoreStore, serializeStore, CUSTOM_TYPE } from "./session-store";
+import { findStoreEntry, restoreStore, CUSTOM_TYPE } from "./session-store";
 import { createSpawnAgentTool } from "./tools/spawn-agent";
 import { createAgentCommand } from "./commands/agent";
 import { createGoalCommand } from "./commands/goal";
@@ -34,7 +34,6 @@ export default function (pi: ExtensionAPI) {
   const subdermialDir = path.join(agentDir, "subdermial");
   const sessionsDir = path.join(subdermialDir, "sessions");
   const goalsDir = path.join(subdermialDir, "goals");
-  const namesPath = path.join(subdermialDir, "names.json");
 
   // Initialize logger
   initLogger(subdermialDir);
