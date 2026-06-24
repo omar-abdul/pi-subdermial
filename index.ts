@@ -187,29 +187,27 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (event, context) => {
     info(`Session started: reason=${event.reason}`);
 
-    // Restore state from previous session (skip for reload - state is already in memory)
-    if (event.reason !== "reload") {
-      const entries = context.sessionManager.getEntries();
-      const stored = findStoreEntry(entries);
-      const restored = restoreStore(stored);
+    // Restore state from persisted session entries
+    const entries = context.sessionManager.getEntries();
+    const stored = findStoreEntry(entries);
+    const restored = restoreStore(stored);
 
-      manager.agents = restored.agents;
-      manager.usedNames = restored.usedNames;
+    manager.agents = restored.agents;
+    manager.usedNames = restored.usedNames;
 
-      if (restored.activeGoal && restored.activeGoal.status === "active") {
-        manager.activeGoal = restored.activeGoal;
-        info(`Restored active goal: ${restored.activeGoal.id}`);
-      }
-
-      if (event.reason === "resume" && manager.activeGoal) {
-        context.ui.notify(
-          `Active goal restored: ${manager.activeGoal.description.slice(0, 60)}...`,
-          "info",
-        );
-      }
-
-      manager.persist();
+    if (restored.activeGoal && restored.activeGoal.status === "active") {
+      manager.activeGoal = restored.activeGoal;
+      info(`Restored active goal: ${restored.activeGoal.id}`);
     }
+
+    if (event.reason === "resume" && manager.activeGoal) {
+      context.ui.notify(
+        `Active goal restored: ${manager.activeGoal.description.slice(0, 60)}...`,
+        "info",
+      );
+    }
+
+    manager.persist();
 
     // Initialize/reinitialize widget
     initWidget(context);
