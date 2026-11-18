@@ -28,8 +28,10 @@ export function log(level: "INFO" | "WARN" | "ERROR" | "DEBUG", message: string,
   if (logStream) {
     logStream.write(line + "\n");
   }
-  // Also write to stderr for visibility during development
-  if (level === "ERROR" || level === "WARN") {
+  // Do not write diagnostics directly to stderr during the TUI: terminal control
+  // sequences and redraws can leak into the prompt editor. Opt in only when
+  // debugging the extension outside the TUI.
+  if ((level === "ERROR" || level === "WARN") && process.env.SUBDERMIAL_DEBUG_STDERR === "1") {
     process.stderr.write(`[subdermial:${level.toLowerCase()}] ${message}\n`);
   }
 }

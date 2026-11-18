@@ -238,6 +238,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async (event) => {
     info(`Session shutdown: reason=${event.reason}`);
+    await manager.shutdown();
     manager.persist();
     if (widget) widget.clear();
     closeLogger();

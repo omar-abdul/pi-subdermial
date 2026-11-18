@@ -63,6 +63,7 @@ export function restoreStore(
         agent.endTime = Date.now();
         delete agent.pid;
         delete agent.terminalPid;
+        agent.terminalStatus = "closed";
       }
       agents.set(id, agent);
     }

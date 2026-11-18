@@ -37,8 +37,10 @@ export interface AgentState {
   sessionFile: string;
   /** Process ID (if running) */
   pid?: number;
-  /** Terminal PID (if open via /open-agent) */
+  /** Terminal launcher PID, when the terminal can be monitored reliably. */
   terminalPid?: number;
+  /** State of the interactive terminal opened for this agent. */
+  terminalStatus?: "open" | "closed" | "unmonitored";
   /** Timestamp when spawned (ms) */
   startTime: number;
   /** Timestamp when completed (ms) */

@@ -7,7 +7,7 @@
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { AgentManager } from "../agent-manager";
+import { normalizeTask, type AgentManager } from "../agent-manager";
 import { info, error } from "../logger";
 
 interface ParsedArgs {
@@ -19,63 +19,89 @@ interface ParsedArgs {
 }
 
 function parseArgs(rawArgs: string): ParsedArgs | { error: string } {
-  // Match quoted string or unquoted first arg as task
-  let task = "";
-  const rest: string[] = [];
+  const tokenized = tokenize(rawArgs);
+  if ("error" in tokenized) return tokenized;
 
-  const trimmed = rawArgs.trim();
-  if (trimmed.startsWith('"')) {
-    const endIdx = trimmed.indexOf('"', 1);
-    if (endIdx === -1) return { error: "Unclosed quote in task" };
-    task = trimmed.slice(1, endIdx);
-    const remainder = trimmed.slice(endIdx + 1).trim();
-    if (remainder) rest.push(...remainder.split(/\s+/));
-  } else if (trimmed.startsWith("'")) {
-    const endIdx = trimmed.indexOf("'", 1);
-    if (endIdx === -1) return { error: "Unclosed quote in task" };
-    task = trimmed.slice(1, endIdx);
-    const remainder = trimmed.slice(endIdx + 1).trim();
-    if (remainder) rest.push(...remainder.split(/\s+/));
-  } else {
-    // Try to find -- to split task from flags
-    const flagIdx = trimmed.indexOf(" --");
-    if (flagIdx === -1) {
-      task = trimmed;
-    } else {
-      task = trimmed.slice(0, flagIdx).trim();
-      const flagPart = trimmed.slice(flagIdx + 1).trim();
-      // Parse flags manually
-      rest.push(...flagPart.split(/\s+(?=--)/));
+  const result: ParsedArgs = { task: "" };
+  const taskParts: string[] = [];
+  const tokens = tokenized.tokens;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--") {
+      taskParts.push(...tokens.slice(i + 1));
+      break;
     }
-  }
 
-  const result: ParsedArgs = { task };
+    if (!token.startsWith("--")) {
+      taskParts.push(token);
+      continue;
+    }
 
-  // Parse flags
-  let currentFlag: string | null = null;
-  for (const token of rest) {
-    if (token.startsWith("--")) {
-      if (token.includes("=")) {
-        const [flag, value] = token.split("=", 2);
-        const flagName = flag.slice(2);
-        setFlag(result, flagName, value);
-        currentFlag = null;
-      } else {
-        const flagName = token.slice(2);
-        // Boolean flags
-        if (flagName === "help") {
-          return { error: "help" };
-        }
-        currentFlag = flagName;
+    const equalsIndex = token.indexOf("=");
+    const flag = (equalsIndex === -1 ? token.slice(2) : token.slice(2, equalsIndex)).trim();
+    if (flag === "help") return { error: "help" };
+    if (!isSupportedFlag(flag)) return { error: `Unknown option: --${flag}` };
+
+    let value: string | undefined = equalsIndex === -1 ? undefined : token.slice(equalsIndex + 1);
+    if (value === undefined) {
+      const next = tokens[i + 1];
+      if (next === undefined || next.startsWith("--")) {
+        return { error: `Option --${flag} requires a value` };
       }
-    } else if (currentFlag) {
-      setFlag(result, currentFlag, token);
-      currentFlag = null;
+      value = next;
+      i++;
     }
+    setFlag(result, flag, value);
   }
 
+  result.task = normalizeTask(taskParts.join(" "));
   if (!result.task) return { error: "No task specified" };
   return result;
+}
+
+function tokenize(input: string): { tokens: string[] } | { error: string } {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+
+  for (const char of input) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (escaped) current += "\\";
+  if (quote) return { error: "Unclosed quote" };
+  if (current) tokens.push(current);
+  return { tokens };
+}
+
+function isSupportedFlag(flag: string): boolean {
+  return flag === "tools" || flag === "t" || flag === "model" || flag === "m" ||
+    flag === "profile" || flag === "p" || flag === "cwd";
 }
 
 function setFlag(result: ParsedArgs, flag: string, value: string): void {
@@ -98,6 +124,10 @@ function setFlag(result: ParsedArgs, flag: string, value: string): void {
   }
 }
 
+function clearCommandInput(ctx: ExtensionCommandContext): void {
+  if (ctx.hasUI) ctx.ui.setEditorText("");
+}
+
 export function createAgentCommand(manager: AgentManager) {
   return {
     description: "Spawn a subdermial agent for a specific task",
@@ -112,6 +142,7 @@ export function createAgentCommand(manager: AgentManager) {
           );
           return;
         }
+        clearCommandInput(ctx);
         ctx.ui.notify(`Error: ${parsed.error}`, "error");
         return;
       }
@@ -156,6 +187,7 @@ export function createAgentCommand(manager: AgentManager) {
         );
       } catch (err: any) {
         error("/agent failed", err);
+        clearCommandInput(ctx);
         ctx.ui.notify(`Failed to spawn agent: ${err.message}`, "error");
       }
     },

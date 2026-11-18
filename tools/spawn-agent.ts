@@ -6,7 +6,7 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "../agent-manager";
 import type { GoalEngine } from "../goal-engine";
 import { info, error } from "../logger";
@@ -91,107 +91,52 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
           systemPrompt,
           goalId: goal?.id,
           apiKey,
+          notifyOrchestrator: false,
         });
 
-        // Wait for agent to complete (poll with abort support)
-        const startTime = Date.now();
-        const maxWait = 30 * 60 * 1000; // 30 minute max wait
-        let lastUpdate = 0;
-
-        while (true) {
-          if (signal?.aborted) {
-            manager.killAgent(agent.id, "Aborted by orchestrator");
-            return {
-              content: [{ type: "text", text: `Agent ${agent.id} was aborted.` }],
-              isError: true,
-            };
-          }
-
-          const current = manager.agents.get(agent.id);
-          if (!current) {
-            return {
-              content: [{ type: "text", text: `Agent ${agent.id} was removed unexpectedly.` }],
-              isError: true,
-            };
-          }
-
-          if (current.status === "completed") {
-            // Append to progress if in goal mode
-            if (goal && current.result) {
-              goalEngine.appendProgress(agent.id, current.result, true);
-            }
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `[${current.displayName} - ✓ completed]\n\n${current.result || taskSummary(current)}`,
-                },
-              ],
-              details: {
-                agentId: current.id,
-                displayName: current.displayName,
-                status: current.status,
-                turns: current.turns,
-                usage: current.usage,
-                model: current.model,
-              },
-            };
-          }
-
-          if (current.status === "errored") {
-            // Append to progress if in goal mode
-            if (goal) {
-              goalEngine.appendProgress(agent.id, current.error || "Unknown error", false);
-            }
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `[${current.displayName} - ✗ errored]\n\n**Error:** ${current.error || "Unknown error"}`,
-                },
-              ],
-              isError: true,
-              details: {
-                agentId: current.id,
-                displayName: current.displayName,
-                status: current.status,
-                error: current.error,
-              },
-            };
-          }
-
-          if (current.status === "killed") {
-            return {
-              content: [
-                { type: "text", text: `[${current.displayName} - ☠ killed]\n\n${current.error || "Killed"}` },
-              ],
-              isError: true,
-            };
-          }
-
-          if (Date.now() - startTime > maxWait) {
-            manager.killAgent(agent.id, "Timed out");
-            return {
-              content: [{ type: "text", text: `Agent ${agent.id} timed out after 30 minutes.` }],
-              isError: true,
-            };
-          }
-
-          // Streaming update every 3 seconds
-          const now = Date.now();
-          if (now - lastUpdate > 3000 && onUpdate) {
-            lastUpdate = now;
-            const elapsed = Math.round((now - agent.startTime) / 1000);
-            onUpdate({
-              content: [{ type: "text", text: `⏳ ${agent.displayName} working... (${elapsed}s, ${agent.turns} turns)` }],
-              details: { agentId: agent.id, status: agent.status, turns: agent.turns },
-            });
-          }
-
-          await sleep(500);
+        const completed = await waitWithAbort(manager, agent.id, signal, onUpdate);
+        if (completed.status === "completed") {
+          if (goal && completed.result) goalEngine.appendProgress(agent.id, completed.result, true);
+          return {
+            content: [{
+              type: "text",
+              text: `[${completed.displayName} - ✓ completed]\n\n${completed.result || taskSummary(completed)}`,
+            }],
+            details: {
+              agentId: completed.id,
+              displayName: completed.displayName,
+              status: completed.status,
+              turns: completed.turns,
+              usage: completed.usage,
+              model: completed.model,
+            },
+          };
         }
+
+        if (completed.status === "errored") {
+          if (goal) goalEngine.appendProgress(agent.id, completed.error || "Unknown error", false);
+          return {
+            content: [{
+              type: "text",
+              text: `[${completed.displayName} - ✗ errored]\n\n**Error:** ${completed.error || "Unknown error"}`,
+            }],
+            isError: true,
+            details: {
+              agentId: completed.id,
+              displayName: completed.displayName,
+              status: completed.status,
+              error: completed.error,
+            },
+          };
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: `[${completed.displayName} - ☠ killed]\n\n${completed.error || "Killed"}`,
+          }],
+          isError: true,
+        };
       } catch (err: any) {
         error("spawn_agent failed", err);
         return {
@@ -215,6 +160,52 @@ function formatTokens(count: number): string {
   return `${Math.round(count / 1000)}k`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function waitWithAbort(
+  manager: AgentManager,
+  agentId: string,
+  signal: AbortSignal | undefined,
+  onUpdate: any,
+): Promise<import("../types").AgentState> {
+  if (signal?.aborted) {
+    manager.killAgent(agentId, "Aborted by orchestrator");
+    return manager.waitForAgent(agentId);
+  }
+
+  let updateTimer: NodeJS.Timeout | undefined;
+  let timeoutTimer: NodeJS.Timeout | undefined;
+  let abortHandler: (() => void) | undefined;
+  const completion = manager.waitForAgent(agentId);
+  const abort = new Promise<"aborted">((resolve) => {
+    abortHandler = () => {
+      manager.killAgent(agentId, "Aborted by orchestrator");
+      resolve("aborted");
+    };
+    signal?.addEventListener("abort", abortHandler, { once: true });
+    timeoutTimer = setTimeout(() => {
+      manager.killAgent(agentId, "Timed out after 30 minutes");
+      resolve("aborted");
+    }, 30 * 60 * 1000);
+  });
+
+  if (onUpdate) {
+    updateTimer = setInterval(() => {
+      const current = manager.agents.get(agentId);
+      if (!current) return;
+      const elapsed = Math.round((Date.now() - current.startTime) / 1000);
+      onUpdate({
+        content: [{ type: "text", text: `⏳ ${current.displayName} working... (${elapsed}s, ${current.turns} turns)` }],
+        details: { agentId, status: current.status, turns: current.turns },
+      });
+    }, 3000);
+  }
+
+  try {
+    const result = await Promise.race([completion, abort]);
+    if (result === "aborted") return completion;
+    return result;
+  } finally {
+    if (updateTimer) clearInterval(updateTimer);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (abortHandler) signal?.removeEventListener("abort", abortHandler);
+  }
 }
