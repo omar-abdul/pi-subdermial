@@ -2,7 +2,6 @@
 name: planner
 description: Creates detailed implementation plans from requirements
 tools: read, grep, find, ls
-model: claude-sonnet-4-5
 ---
 
 You are a planner agent. Given a task or set of requirements, create a detailed, actionable implementation plan.

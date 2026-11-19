@@ -61,6 +61,7 @@ spawn_agent(task: "...", tools?: "read,edit", model?: "haiku", profile?: "scout"
 - Call multiple times in one turn for parallel execution
 - Returns compacted result to orchestrator LLM
 - Streaming status updates every 3 seconds
+- If `model` is omitted, selects from Pi's configured/authenticated model pool; falls back to the orchestrator's current model
 
 ### UI: Orchestrator Widget
 
@@ -99,10 +100,10 @@ Each agent:
 
 Agent profiles (YAML frontmatter in `.md` files):
 
-- **scout** — fast read-only recon (haiku, tools: read/grep/find/ls/bash)
-- **worker** — general-purpose implementation (sonnet, all tools)
-- **planner** — creates implementation plans (sonnet, read-only)
-- **reviewer** — code review (sonnet, read-only)
+- **scout** — fast read-only recon (configured model, tools: read/grep/find/ls/bash)
+- **worker** — general-purpose implementation (configured model, all tools)
+- **planner** — creates implementation plans (configured model, read-only)
+- **reviewer** — code review (configured model, read-only)
 
 ### Goal-Driven Workflow
 
@@ -198,13 +199,7 @@ Agent profiles (YAML frontmatter in `.md` files):
 
 **Root cause B (no explicit `--provider`):** pi's `defaultProvider` setting only applies when a model can't be matched to a specific provider. Since `claude-sonnet-4-5` is an Anthropic model, pi always uses the Anthropic provider directly, regardless of `defaultProvider`.
 
-**Final fix:** Read the user's `settings.json` to detect `defaultProvider: "openrouter"`. Pass both `--provider openrouter` (forces the router as the provider) and `--model anthropic/claude-sonnet-4-5` (OpenRouter's model ID format for Anthropic) to the subprocess. The subprocess pi then:
-
-1. Uses the OpenRouter provider (has API key in `auth.json`)
-2. Routes the model request to Anthropic via OpenRouter
-3. Authenticates with the OpenRouter API key
-
-This required changes in `index.ts` (read settings, pass to AgentManager), `agent-manager.ts` (pass `--provider` flag), and `types.ts` (add `defaultProvider` to config interface).
+**Final fix:** Resolve the provider and model from Pi's live model registry at spawn time. The extension now selects from configured/authenticated models (respecting scoped models), passes the selected provider explicitly to the child process, and passes the orchestrator's current model as a fallback when no configured model is available. Explicit `provider/model` requests are still honored. This avoids assuming Anthropic or OpenRouter and supports multiple subscriptions/API-key providers in the same Pi installation.
 
 ## My initial prompt
 

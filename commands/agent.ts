@@ -9,6 +9,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { normalizeTask, type AgentManager } from "../agent-manager";
 import { info, error } from "../logger";
+import { resolveAgentModel } from "../model-selection";
 
 interface ParsedArgs {
   task: string;
@@ -149,32 +150,19 @@ export function createAgentCommand(manager: AgentManager) {
 
       const { task, tools, model, profile, cwd } = parsed as ParsedArgs;
 
-      // Resolve API key for the agent's model
-      let apiKey: string | undefined;
-      try {
-        const agentModel = model || manager.getConfig().defaultModel;
-        const [provider, modelId] = agentModel.includes("/") ? agentModel.split("/", 2) : ["anthropic", agentModel];
-        const resolvedModel = ctx.modelRegistry?.find?.(provider, modelId);
-        if (resolvedModel) {
-          const auth = await ctx.modelRegistry.getApiKeyAndHeaders(resolvedModel);
-          if (auth.ok && auth.apiKey) {
-            apiKey = auth.apiKey;
-          }
-        }
-      } catch {
-        // Will fall back to env vars
-      }
-
       ctx.ui.notify(`Spawning agent for: ${task.slice(0, 60)}...`, "info");
 
       try {
+        const selection = await resolveAgentModel(ctx, model);
+        info(`Using ${selection.provider}/${selection.model} for ${task.slice(0, 80)}`);
         const agent = await manager.spawnAgent({
           task,
           tools: tools ? tools.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
-          model,
+          model: selection.model,
+          provider: selection.provider,
           profile,
           cwd: cwd || ctx.cwd,
-          apiKey,
+          apiKey: selection.apiKey,
         });
 
         ctx.ui.notify(

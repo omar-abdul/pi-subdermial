@@ -29,7 +29,9 @@ export interface AgentState {
   status: AgentStatus;
   /** What the agent was asked to do */
   task: string;
-  /** Model identifier (e.g. "anthropic/claude-sonnet-4-5") */
+  /** Provider id used by the child process (e.g. "openrouter") */
+  provider?: string;
+  /** Model id used by the child process (e.g. "claude-sonnet-4-5") */
   model?: string;
   /** Tools available to this agent */
   tools: string[];
@@ -121,9 +123,9 @@ export interface SubdermialConfig {
   goalsDir: string;
   /** Retry count on agent error */
   retryOnError: number;
-  /** Default model for agents (if not specified) */
+  /** Optional legacy model override; live Pi model selection is preferred. */
   defaultModel: string;
-  /** Default provider for agents (e.g. "openrouter") */
+  /** Optional legacy provider override paired with defaultModel. */
   defaultProvider: string;
   /** Default agent profile */
   defaultProfile: string;

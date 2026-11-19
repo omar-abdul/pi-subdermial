@@ -21,7 +21,8 @@ const DEFAULT_CONFIG: SubdermialConfig = {
   sessionsDir: "",
   goalsDir: "",
   retryOnError: 0,
-  defaultModel: "claude-sonnet-4-5",
+  // Empty by default: the active Pi model/provider is resolved at spawn time.
+  defaultModel: "",
   defaultProvider: "",
   defaultProfile: "worker",
 };
@@ -124,6 +125,8 @@ export class AgentManager {
     cwd?: string;
     systemPrompt?: string;
     goalId?: string;
+    /** Provider for model. Resolved dynamically when omitted. */
+    provider?: string;
     apiKey?: string;
     notifyOrchestrator?: boolean;
   }): Promise<AgentState> {
@@ -157,13 +160,27 @@ export class AgentManager {
     const agentTools = params.tools && params.tools.length > 0
       ? params.tools
       : ["read", "bash", "edit", "write", "grep", "find", "ls"];
-    const agentModel = params.model || this.config.defaultModel;
+    const resolvedModel = splitModelReference(
+      params.provider || this.config.defaultProvider || this.ctx?.model?.provider,
+      params.model || this.config.defaultModel || this.ctx?.model?.id,
+    );
+    if (!resolvedModel.model) {
+      throw new Error(
+        "No model was selected for the subagent. Select a model in Pi or pass an explicit model.",
+      );
+    }
+    if (!resolvedModel.provider) {
+      throw new Error(
+        `No provider was selected for model "${resolvedModel.model}". Select a model in Pi or pass provider/model.`,
+      );
+    }
     const agent: AgentState = {
       id: name,
       displayName: name,
       status: "pending",
       task,
-      model: agentModel,
+      provider: resolvedModel.provider,
+      model: resolvedModel.model,
       tools: agentTools,
       sessionFile,
       startTime: Date.now(),
@@ -322,7 +339,7 @@ export class AgentManager {
   ): Promise<void> {
     const args: string[] = ["--mode", "json", "-p", "--session", agent.sessionFile];
     if (agent.model) args.push("--model", agent.model);
-    if (this.config.defaultProvider) args.push("--provider", this.config.defaultProvider);
+    if (agent.provider) args.push("--provider", agent.provider);
     if (agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
     let env = process.env;
@@ -542,6 +559,25 @@ export class AgentManager {
     if (timer) clearTimeout(timer);
     this.terminalMonitors.delete(agentId);
   }
+}
+
+function splitModelReference(
+  provider: string | undefined,
+  model: string | undefined,
+): { provider?: string; model?: string } {
+  if (!model?.trim()) return {};
+  const trimmedModel = model.trim();
+  if (provider?.trim()) return { provider: provider.trim(), model: trimmedModel };
+
+  // Support legacy provider/model values supplied directly to the manager.
+  const separator = trimmedModel.indexOf("/");
+  if (separator > 0) {
+    return {
+      provider: trimmedModel.slice(0, separator),
+      model: trimmedModel.slice(separator + 1),
+    };
+  }
+  return { model: trimmedModel };
 }
 
 function getPiInvocation(args: string[]): { command: string; args: string[] } {

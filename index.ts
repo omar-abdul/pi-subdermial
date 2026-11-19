@@ -54,30 +54,15 @@ export default function (pi: ExtensionAPI) {
   }
   loadNamePool(namesPath);
 
-  // Detect the orchestrator's default provider from settings (e.g. "openrouter")
-  let defaultProvider = "";
-  try {
-    const settingsPath = path.join(agentDir, "settings.json");
-    if (fs.existsSync(settingsPath)) {
-      const raw = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-      defaultProvider = raw.defaultProvider || "";
-      info(`Detected defaultProvider: ${defaultProvider || "none"}`);
-    }
-  } catch {
-    // Continue without provider override
-  }
-
-  // Determine the default agent model:
-  // If using a router like OpenRouter, use the full model ID with provider prefix
-  // so the router can identify the upstream provider.
-  const agentModel = defaultProvider ? "anthropic/claude-sonnet-4-5" : "claude-sonnet-4-5";
-
+  // Model and provider are resolved from the active Pi context when an agent
+  // is spawned. Do not bake in a provider: users may be signed in to several
+  // providers (including subscriptions and API-key providers).
   // Create the agent manager
   const manager = new AgentManager(pi, {
     sessionsDir,
     goalsDir,
-    defaultModel: agentModel,
-    defaultProvider,
+    defaultModel: "",
+    defaultProvider: "",
     maxConcurrency: 4,
     maxAgents: 20,
     retryOnError: 0,

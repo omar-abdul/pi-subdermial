@@ -6,10 +6,11 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "../agent-manager";
 import type { GoalEngine } from "../goal-engine";
 import { info, error } from "../logger";
+import { resolveAgentModel } from "../model-selection";
 
 export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, goalEngine: GoalEngine) {
   return {
@@ -19,6 +20,7 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
       "Spawn a subdermial agent with isolated context to handle a delegated task.",
       "The agent runs in a separate pi process and returns results when done.",
       "Use multiple spawn_agent calls in one turn for parallel execution.",
+      "If no model is supplied, a configured/authenticated model is selected dynamically; the orchestrator model is the fallback.",
       "Max 20 agents per session.",
     ].join(" "),
     promptSnippet: "Spawn a subagent to handle a delegated task",
@@ -35,7 +37,7 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
       ),
       model: Type.Optional(
         Type.String({
-          description: "Model to use (e.g. 'anthropic/claude-haiku-4-5'). Defaults to the configured default model.",
+          description: "Model to use (e.g. 'openrouter/anthropic/claude-haiku-4-5'). If omitted, use a configured model or the orchestrator model.",
         }),
       ),
       profile: Type.Optional(
@@ -50,28 +52,11 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
       params: { task: string; tools?: string; model?: string; profile?: string },
       signal: AbortSignal | undefined,
       onUpdate: any,
-      ctx: ExtensionCommandContext,
+      ctx: ExtensionToolContext,
     ) {
       const toolsList = params.tools
         ? params.tools.split(",").map((t: string) => t.trim()).filter(Boolean)
         : undefined;
-
-      // Resolve API key for the agent's model
-      let apiKey: string | undefined;
-      try {
-        const model = params.model || manager.getConfig().defaultModel;
-        const [provider, modelId] = model.includes("/") ? model.split("/", 2) : ["anthropic", model];
-        // Try to get the resolved model from the registry
-        const resolvedModel = ctx.modelRegistry?.find?.(provider, modelId);
-        if (resolvedModel) {
-          const auth = await ctx.modelRegistry.getApiKeyAndHeaders(resolvedModel);
-          if (auth.ok && auth.apiKey) {
-            apiKey = auth.apiKey;
-          }
-        }
-      } catch {
-        // Will fall back to env vars
-      }
 
       const goal = manager.activeGoal;
       let systemPrompt: string | undefined;
@@ -83,14 +68,17 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
       info(`LLM requesting spawn_agent: ${params.task.slice(0, 80)}...`);
 
       try {
+        const selection = await resolveAgentModel(ctx, params.model);
+        info(`Using ${selection.provider}/${selection.model} for subagent`);
         const agent = await manager.spawnAgent({
           task: params.task,
           tools: toolsList,
-          model: params.model,
+          model: selection.model,
+          provider: selection.provider,
           profile: params.profile,
           systemPrompt,
           goalId: goal?.id,
-          apiKey,
+          apiKey: selection.apiKey,
           notifyOrchestrator: false,
         });
 
@@ -108,6 +96,7 @@ export function createSpawnAgentTool(pi: ExtensionAPI, manager: AgentManager, go
               status: completed.status,
               turns: completed.turns,
               usage: completed.usage,
+              provider: completed.provider,
               model: completed.model,
             },
           };
